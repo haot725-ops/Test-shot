@@ -1170,5 +1170,108 @@ react/cjs/react-jsx-runtime.production.js:
    * LICENSE file in the root directory of this source tree.
    *)
 */
-</script></body>
+</script>
+<!-- Aureve Shot Advisor -->
+<div id="asa-root" style="position:fixed;right:14px;bottom:14px;z-index:99999;font-family:Outfit,system-ui,sans-serif;">
+  <button id="asa-open" style="border:0;border-radius:999px;padding:12px 16px;background:#1c1612;color:#efe8dc;font-weight:600;box-shadow:0 8px 24px rgba(0,0,0,.25);cursor:pointer;">Gợi ý chỉnh shot</button>
+  <div id="asa-panel" style="display:none;position:fixed;inset:auto 14px 74px 14px;max-width:420px;margin:auto;background:#fffaf3;color:#1c1612;border:1px solid #e5d8c6;border-radius:18px;padding:16px;box-shadow:0 18px 50px rgba(0,0,0,.25);max-height:min(78vh,640px);overflow:auto;">
+    <div style="display:flex;justify-content:space-between;align-items:center;gap:10px;">
+      <strong style="font-size:17px;">Gợi ý chỉnh shot</strong>
+      <button id="asa-close" style="border:0;background:transparent;font-size:20px;cursor:pointer;">×</button>
+    </div>
+    <p style="margin:6px 0 12px;color:#6b5b4b;font-size:13px;">Nhập thông số shot sáng nay. App sẽ đề xuất <b>một thay đổi chính</b> để test lần sau.</p>
+    <div style="display:grid;grid-template-columns:1fr 1fr;gap:8px;">
+      <label style="font-size:12px;">Dose (g)<input id="asa-dose" type="number" step="0.1" min="5" max="30" placeholder="18" style="width:100%;margin-top:4px;padding:9px;border:1px solid #d9c8b4;border-radius:10px;"></label>
+      <label style="font-size:12px;">Yield (g)<input id="asa-yield" type="number" step="0.1" min="10" max="80" placeholder="36" style="width:100%;margin-top:4px;padding:9px;border:1px solid #d9c8b4;border-radius:10px;"></label>
+      <label style="font-size:12px;">Thời gian (giây)<input id="asa-time" type="number" step="0.5" min="8" max="60" placeholder="27" style="width:100%;margin-top:4px;padding:9px;border:1px solid #d9c8b4;border-radius:10px;"></label>
+      <label style="font-size:12px;">Pre-infusion (giây)<input id="asa-pre" type="number" step="0.5" min="0" max="20" placeholder="0" style="width:100%;margin-top:4px;padding:9px;border:1px solid #d9c8b4;border-radius:10px;"></label>
+    </div>
+    <label style="display:block;font-size:12px;margin-top:8px;">Grind hiện tại<input id="asa-grind" type="text" placeholder="VD: 12 / 3.2 / mịn hơn hôm qua" style="width:100%;margin-top:4px;padding:9px;border:1px solid #d9c8b4;border-radius:10px;"></label>
+    <div style="margin-top:10px;font-size:12px;">Cảm nhận vị</div>
+    <div id="asa-tastes" style="display:flex;flex-wrap:wrap;gap:6px;margin-top:6px;"></div>
+    <label style="display:block;font-size:12px;margin-top:10px;">Ghi chú<input id="asa-note" type="text" placeholder="Channeling, mùi, loại cà phê..." style="width:100%;margin-top:4px;padding:9px;border:1px solid #d9c8b4;border-radius:10px;"></label>
+    <button id="asa-analyze" style="width:100%;margin-top:12px;border:0;border-radius:12px;padding:12px;background:#b24a24;color:#fff;font-weight:700;cursor:pointer;">Phân tích & lưu shot</button>
+    <div id="asa-result" style="display:none;margin-top:12px;border-top:1px dashed #d9c8b4;padding-top:12px;"></div>
+    <div style="display:flex;justify-content:space-between;align-items:center;margin-top:14px;">
+      <strong style="font-size:13px;">Lịch sử gần đây</strong>
+      <button id="asa-clear" style="border:0;background:transparent;color:#a33;font-size:12px;cursor:pointer;">Xoá lịch sử</button>
+    </div>
+    <div id="asa-history" style="margin-top:8px;font-size:12px;color:#4b3b2d;"></div>
+  </div>
+</div>
+<script>
+(function(){
+  var KEY='aureve_shot_advisor_v1';
+  var tastes=[{k:'sour',t:'Chua'},{k:'bitter',t:'Đắng'},{k:'thin',t:'Mỏng/nhạt'},{k:'strong',t:'Đậm/gắt'},{k:'dry',t:'Khô/khét'},{k:'balanced',t:'Cân bằng'}];
+  var root=document.getElementById('asa-root');
+  if(!root) return;
+  var panel=document.getElementById('asa-panel'),result=document.getElementById('asa-result'),historyBox=document.getElementById('asa-history');
+  var tasteBox=document.getElementById('asa-tastes');
+  tastes.forEach(function(x){
+    var l=document.createElement('label');
+    l.style.cssText='display:flex;align-items:center;gap:5px;border:1px solid #d9c8b4;border-radius:999px;padding:6px 10px;cursor:pointer;font-size:12px;';
+    l.innerHTML='<input type="checkbox" value="'+x.k+'"> '+x.t;
+    tasteBox.appendChild(l);
+  });
+  function load(){try{return JSON.parse(localStorage.getItem(KEY)||'[]')}catch(e){return[]}}
+  function save(a){localStorage.setItem(KEY,JSON.stringify(a.slice(-50)))}
+  function num(id){var v=parseFloat(document.getElementById(id).value);return isFinite(v)?v:null}
+  function selected(){return Array.prototype.map.call(tasteBox.querySelectorAll('input:checked'),function(i){return i.value})}
+  function ratio(d,y){return d&&y?y/d:null}
+  function advice(d){
+    var r=ratio(d.dose,d.yield),t=d.time,p=d.pre,ts=d.tastes,out=[],main='';
+    function has(k){return ts.indexOf(k)>=0}
+    if(r!==null){
+      if(r<1.6) out.push('Ratio '+r.toFixed(2)+':1 khá đậm/gắt. Cân nhắc tăng yield nhẹ, ví dụ thêm 2–4 g, giữ nguyên dose.');
+      else if(r>2.4) out.push('Ratio '+r.toFixed(2)+':1 khá loãng. Cân nhắc giảm yield 2–4 g hoặc tăng dose nhẹ.');
+      else out.push('Ratio '+r.toFixed(2)+':1 đang trong vùng phổ biến cho espresso.');
+    }
+    if(has('sour')&&(t===null||t<25)){
+      main='Nghiền mịn hơn 1 nấc nhỏ, giữ nguyên dose và yield.';
+      out.push('Shot chua và/hoặc thời gian ngắn: extraction chưa đủ. Đổi grind trước, không đổi nhiều biến cùng lúc.');
+    } else if((has('bitter')||has('dry'))&&(t===null||t>32)){
+      main='Nghiền thô hơn 1 nấc nhỏ hoặc giảm thời gian extraction.';
+      out.push('Shot đắng/khô và thời gian dài: có dấu hiệu over-extraction.');
+    } else if(has('thin')){
+      main='Giảm yield 2–4 g hoặc tăng dose nhẹ nếu shot quá loãng.';
+      out.push('Vị mỏng: ưu tiên tăng cường độ bằng yield/dose, chưa cần mịn grind ngay.');
+    } else if(has('strong')){
+      main='Tăng yield 2–4 g để làm mềm vị.';
+      out.push('Vị đậm/gắt: tăng yield nhẹ trước khi đổi grind.');
+    } else if(has('balanced')){
+      main='Giữ nguyên công thức và chỉ ghi nhận biến thể nhỏ.';
+      out.push('Shot cân bằng: lặp lại đúng thông số này để xác nhận độ ổn định.');
+    } else if(t!==null){
+      if(t<22){main='Nghiền mịn hơn 1 nấc nhỏ.';out.push('Thời gian ngắn: extraction có thể chưa đủ.')}
+      else if(t>34){main='Nghiền thô hơn 1 nấc nhỏ.';out.push('Thời gian dài: có thể over-extraction.')}
+      else{main='Giữ nguyên grind, đánh giá lại vị ở shot kế.';out.push('Thời gian nằm trong vùng hợp lý.')}
+    } else {main='Nhập thêm thời gian và cảm nhận vị để có gợi ý chính xác hơn.'}
+    if(p!==null){
+      if(has('sour')&&p<3) out.push('Pre-infusion ngắn: thử tăng 1–2 giây nếu máy cho phép.');
+      if((has('bitter')||has('dry'))&&p>6) out.push('Pre-infusion khá dài: thử giảm 1–2 giây.');
+    }
+    if(d.note) out.push('Ghi chú: '+d.note);
+    return {main:main,notes:out,ratio:r};
+  }
+  function renderHistory(){
+    var a=load();
+    historyBox.innerHTML=a.length?a.slice().reverse().slice(0,5).map(function(x){
+      return '<div style="border:1px solid #eadfd0;border-radius:10px;padding:8px;margin-bottom:6px;"><b>'+x.date+'</b> — '+x.dose+'g → '+x.yield+'g, '+x.time+'s'+(x.ratio?', ratio '+x.ratio.toFixed(2)+':1':'')+'<br><span style="color:#6b5b4b">'+x.main+'</span></div>';
+    }).join(''):'<i>Chưa có shot nào được lưu.</i>';
+  }
+  document.getElementById('asa-open').onclick=function(){panel.style.display=panel.style.display==='none'?'block':'none';renderHistory()};
+  document.getElementById('asa-close').onclick=function(){panel.style.display='none'};
+  document.getElementById('asa-clear').onclick=function(){if(confirm('Xoá toàn bộ lịch sử gợi ý shot?')){localStorage.removeItem(KEY);renderHistory();result.style.display='none'}};
+  document.getElementById('asa-analyze').onclick=function(){
+    var d={dose:num('asa-dose'),yield:num('asa-yield'),time:num('asa-time'),pre:num('asa-pre'),grind:document.getElementById('asa-grind').value,note:document.getElementById('asa-note').value,tastes:selected(),date:new Date().toLocaleString('vi-VN')};
+    if(d.dose===null||d.yield===null){result.style.display='block';result.innerHTML='<b>Cần nhập Dose và Yield.</b>';return}
+    var a=advice(d);d.ratio=a.ratio;d.main=a.main;
+    var arr=load();arr.push(d);save(arr);renderHistory();
+    result.style.display='block';
+    result.innerHTML='<div style="background:#f4e7d7;border-radius:12px;padding:10px;"><b>Thay đổi chính:</b><br>'+a.main+'</div><ul style="margin:10px 0 0 18px;padding:0;">'+a.notes.map(function(x){return '<li style="margin-bottom:5px;">'+x+'</li>'}).join('')+'</ul>';
+  };
+})();
+</script>
+
+</body>
 </html>
